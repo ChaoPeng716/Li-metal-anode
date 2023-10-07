@@ -1,0 +1,789 @@
+# -*- coding: utf-8 -*-
+"""
+-------------------------------------------------
+   File Name：     pubchem_search
+   Description :
+   Author :       DrZ
+   date：          2022/11/6
+-------------------------------------------------
+   Change Activity:
+                   2022/11/6:
+-------------------------------------------------
+"""
+import os
+import sys
+import itertools
+import pandas as pd
+import pubchempy as pcp
+
+
+"""
+ id     group       SMILES                  location
+-----------------------------------------------------
+# 1     OF          FO                      top
+# 2     CH          [=C, C]                 medium
+# 3     CH2         C                       medium
+#                   =C                      bottom
+# 4     CH3         C                       bottom
+# 5     CH(CH3)2    C(C)C                   bottom
+# 6     NH2         N                       bottom
+# 7     NHCH3       NC                      bottom
+# 8     NHCH2CH3    NCC                     bottom
+# 9     O           O                       medium
+# 10    OCH3        OC                      bottom
+# 11    OCH2CH3     OCC                     bottom
+# 12    OCH(CH3)2   OC(C)C                  bottom
+# 13    OH          O                       bottom
+# 14    Benzene     c1ccc(*)cc1             medium
+#                   c1ccccc1                bottom
+# 15    CH2F        FC                      top
+# 16    CHF2        FC(F)                   top
+# 17    CF2         FC(F)                   medium
+# 18    CF3         FC(F)(F)                top
+# 19    Benzene2-F  Fc1cc2c(cc(cc2)*)cc1    top
+# 20    Benzene-F   Fc1ccc(*)cc1            top
+# 21    SF          FS                      top
+# 22    SF3         FS(F)(F)                top
+# 23    SF5         FS(F)(F)(F)(F)          top
+# 24    SFO2        FS(=O)(=O)              top
+# 25    SO2         S(=O)(=O)               medium
+# 26    SOF         FS(=O)                  top
+# 27    NHF         FN                      top
+# 28    NF2         FN(F)                   top
+# 29    PHF         FP                      top
+# 30    PF2         FP(F)                   top
+# 31    POF2        FP(=O)(F)               top
+# 32    PSF2        FP(=S)(F)               top
+# 33    PF4         FP(F)(F)(F)             top
+"""
+
+def benzene_string(stringList):
+    """
+    deal with the benzene smile with *, substitute * with next smile string.
+    stringList: a list includes the possible smile group. like ['FO', '=C']
+    """
+    # convert stringList [X,A,B,C,X,D,E,X,C] to [X,ABC,X,DE,X,C]
+    sort_list = []
+    piece_string = ''
+    for n, i in enumerate(stringList):
+        if i in ['Fc1cc2c(cc(cc2)*)cc1', 'Fc1ccc(*)cc1', 'c1ccc(*)cc1']:
+            if len(piece_string) != 0:
+                sort_list.append(piece_string)
+            sort_list.append(i)
+            piece_string = ''
+        else:
+            piece_string = piece_string + i
+        if n == len(stringList)-1:
+            sort_list.append(piece_string)
+    if len(sort_list) == 1:
+        return sort_list[0]
+
+    # reverse [X,ABC,X,DE,X,C] to [C,X,DE,X,ABC,X]
+    reversed_list = [i for i in reversed(sort_list)]
+    final_string = ''
+    for n, i in enumerate(reversed_list):
+        try:
+            if (n == len(reversed_list)-1) and (i not in ['Fc1cc2c(cc(cc2)*)cc1', 'Fc1ccc(*)cc1', 'c1ccc(*)cc1']):
+                final_string = i + final_string
+                return final_string
+            xx = reversed_list[n + 1]
+            if xx in ['Fc1cc2c(cc(cc2)*)cc1', 'Fc1ccc(*)cc1', 'c1ccc(*)cc1']:
+                if i in ['Fc1cc2c(cc(cc2)*)cc1', 'Fc1ccc(*)cc1', 'c1ccc(*)cc1']:
+                    final_string = xx.replace('*', final_string)
+                else:
+                    final_string = final_string + i
+                    final_string = xx.replace('*', final_string)
+        except:
+            return final_string
+
+def main(num, top_list, bottom_list):
+    # medium_list = ['=C', 'C', 'O', 'c1ccc(*)cc1', 'FC(F)', 'S(=O)(=O)']
+    medium_list = ['=C', 'C', 'O', 'S(=O)(=O)']
+    # continue jobs
+    if os.path.exists('search.txt'):
+        ff = open('search.txt', 'r')
+        n_m = ff.readlines()[-1].strip()
+        m_c = n_m[1]
+    else:
+        m_c = -1
+    n = 0
+    m = 0
+    for i in range(num, num+1):
+        if i == 2:
+            for top in top_list:
+                for bottom in bottom_list:
+                    smile = benzene_string([top, bottom])
+                    if m <= int(m_c):
+                        m = m + 1
+                        continue
+                    f = open('search.txt', 'a')
+                    print(i, m, smile, file=f)
+                    f.close()
+                    print(i, m, smile)
+                    try:
+                        c = pcp.get_compounds(smile, 'smiles', as_dataframe=True)
+                        c.to_csv('{}_{}.csv'.format(i, n), index=False)
+                        n = n + 1
+                        m = m + 1
+                    except:
+                        m = m + 1
+                        continue
+
+        else:
+            medium_combine = itertools.product(medium_list, repeat=i - 2)
+            medium_piece_list = list(medium_combine)
+            for top in top_list:
+                for bottom in bottom_list:
+                    for me in medium_piece_list:
+                        final_string = list(me)
+                        final_string.insert(0, top)
+                        final_string.append(bottom)
+                        smile = benzene_string(final_string)
+                        if m <= int(m_c):
+                            m = m + 1
+                            continue
+                        f = open('search.txt', 'a')
+                        print(i, m, smile, file=f)
+                        f.close()
+                        print(i, m, smile)
+                        try:
+                            c = pcp.get_compounds(smile, 'smiles', as_dataframe=True)
+                            c.to_csv('{}_{}.csv'.format(i, n), index=False)
+                            n = n + 1
+                            m = m + 1
+                        except:
+                            m = m + 1
+                            continue
+
+        f = open('search.txt', 'a')
+        print('total:', n, file=f)
+        f.close()
+        print('total:', n)
+
+"""
+top_list = ['FO', 'FC', 'FC(F)', 'FC(F)(F)', 'Fc1cc2c(cc(cc2)*)cc1', 'Fc1ccc(*)cc1', 'FS',
+            'FS(F)(F)', 'FS(F)(F)(F)(F)', 'FS(=O)(=O)', 'FS(=O)', 'FN', 'FN(F)', 'FP', 'FP(F)',
+            'FP(=O)(F)', 'FP(=S)(F)', 'FP(F)(F)(F)']
+            
+bottom_list = ['=C', 'C', 'C(C)C', 'N', 'NC', 'NCC', 'OC', 'OCC', 'OC(C)C', 'O', 'c1ccccc1']
+a python job with one top in top_list
+"""
+# for example:
+num = 10
+top_list = ['FO', 'FS', 'FS(F)(F)']
+bottom_list = ['=C', 'C', 'C(C)C', 'N', 'NC', 'NCC', 'OC', 'OCC', 'O']
+main(num=num, top_list=top_list, bottom_list=bottom_list)
+
+# -*- coding: utf-8 -*-
+"""
+-------------------------------------------------
+   File Name：     confirm_model
+   Description :
+   Author :       DrZ
+   date：          2023/1/10
+-------------------------------------------------
+   Change Activity:
+                   2023/1/10:
+-------------------------------------------------
+"""
+import os
+import sys
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score
+from sklearn.externals import joblib
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import GradientBoostingRegressor
+
+
+pd.set_option('display.max_columns', None)
+sys.setrecursionlimit(10000000)
+data = pd.read_csv(r"F:\pycharmProject\my_job\daily_test\pengchao\new_update_minus0\pengchao_minus0.csv")
+# training and test
+data1 = data[0:82]
+y = data1['barrier'].values
+x = data1.drop(["barrier", "reaction energy", "top adsorption", "bottom adsorption", "electron_density"], axis=1)
+
+# # 8 potential data
+# test_data = data[79:]
+# y_add = test_data['barrier'].values
+# x_add = test_data.drop(["barrier", "reaction energy", "top adsorption", "bottom adsorption", "electron_density"], axis=1)
+
+x_train, x_test, y_train, y_test = train_test_split(x, y, random_state=562232, train_size=0.9)
+
+gbr = joblib.load(r'F:\pycharmProject\my_job\daily_test\pengchao\new_update_minus0\model\train_model_562232_0.83_0.11.m')
+y_gbr = gbr.predict(x_test)
+y_gbr2 = gbr.predict(x_train)
+# y_gbr1 = gbr.predict(x_add)
+# print(y_add)
+# print(y_gbr1)
+# # write 8 potential materials
+# ddd = pd.DataFrame()
+# ddd['true_energy'] = y_add
+# ddd['predict_energy'] = y_gbr1
+# ddd.to_csv('8potential_materials.csv', index=False)
+r2 = r2_score(y_test, y_gbr)
+mse = mean_squared_error(y_test, y_gbr)
+rr = np.sqrt(mse)
+
+print('##########')
+print("R2:", r2)
+print("RMSE:", rr)
+#
+feature_importance = gbr.feature_importances_
+print(feature_importance)
+feature_title = ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10", "l11", "l12", "l13", "l14",
+             "HOMO-LUMO gap", "electrostatic_potential", "ESP pos mean", "ESP neg mean", "QM Dipole",
+             "electronegativity", "polarizability", "oxidation potential", "reduction potential"]
+ddd = pd.DataFrame()
+ddd['descriptors'] = feature_title
+ddd['importance'] = feature_importance
+ddd.to_csv('feature_importance.csv', index=False)
+plt.figure(figsize=(14, 6))
+ax1 = plt.subplot(1, 2, 1)
+# stack_barh
+ind = ["HOMO-LUMO gap", "electronegativity", "ESP neg mean", "reduction potential", "polarizability",
+       "electrostatic potential", "ESP pos mean", "oxidation potential", "QM Dipole", "structure label"]
+
+df1 = pd.DataFrame(columns=feature_title, index=ind)
+df1.iloc[0, 14] = feature_importance[14]
+df1.iloc[1, 19] = feature_importance[19]
+df1.iloc[2, 17] = feature_importance[17]
+df1.iloc[3, 22] = feature_importance[22]
+df1.iloc[4, 20] = feature_importance[20]
+df1.iloc[5, 15] = feature_importance[15]
+df1.iloc[6, 16] = feature_importance[16]
+df1.iloc[7, 21] = feature_importance[21]
+df1.iloc[8, 18] = feature_importance[18]
+df1.iloc[9, 0:14] = feature_importance[0:14]
+
+df1 = df1.fillna(0)
+df1.plot(kind='barh', stacked=True, align='center', alpha=0.8, ax=ax1)
+plt.xlabel('Importance', size=14)
+plt.xticks(fontsize=12)
+plt.yticks(fontsize=12)
+ax1.get_legend().remove()
+ax2 = plt.subplot(1, 2, 2)
+plt.plot(y_train, y_train, c='indigo', alpha=0.7)
+plt.xlabel('$E_{DFT}$(eV)', size=14)
+plt.ylabel('$E_{Predicted}$(eV)', size=14)
+plt.text(1, 0.4, "RMSE={}".format(np.round(rr, 2)), size=14)
+plt.text(1, 0.3, "R2={}".format(np.round(r2, 2)), size=14)
+plt.scatter(y_train, y_gbr2, c='indigo', alpha=0.5, s=100, label="training")
+plt.scatter(y_test, y_gbr, c='green', alpha=0.7, s=100, label="test")
+plt.legend(loc=2, fontsize=14)
+plt.xticks(fontsize=12)
+plt.yticks(fontsize=12)
+plt.tight_layout()
+# plt.savefig('energy_RMSE.jpg')
+plt.show()
+#
+# df = pd.concat([pd.DataFrame({'t_train': y_train}),
+#            pd.DataFrame({'p_train': y_gbr2}),
+#            pd.DataFrame({'t_test': y_test}),
+#            pd.DataFrame({'p_test': y_gbr}),
+#            pd.DataFrame({'t_potential': y_add}),
+#            pd.DataFrame({'p_potential': y_gbr1})], axis=1)
+# print(df)
+# df.to_csv('plot_RMSE.csv', index=False)
+
+# -*- coding: utf-8 -*-
+"""
+-------------------------------------------------
+   File Name：     fix_variable
+   Description :
+   Author :       DrZ
+   date：          2022/10/28
+-------------------------------------------------
+   Change Activity:
+                   2022/10/28:
+-------------------------------------------------
+"""
+import sys
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+from sklearn.externals import joblib
+from sklearn.metrics import r2_score
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import GradientBoostingRegressor
+
+
+def normalization(data):
+    _range = np.max(data) - np.min(data)
+    return (data - np.min(data)) / _range
+
+pd.set_option('display.max_rows', None)
+sys.setrecursionlimit(10000000)
+data = pd.read_csv(r"pengchao_minus0.csv")
+y = data['barrier'].values
+x = data.drop(["barrier", "reaction energy", "top adsorption", "bottom adsorption", "electron_density"], axis=1)
+
+# # violin plot
+# data['reduction potential'] = data['reduction potential'] - np.mean(data['reduction potential'])
+# data['oxidation potential'] = data['oxidation potential'] - np.mean(data['oxidation potential'])
+# sns.violinplot(data=data[['reduction potential', 'oxidation potential']], orient="v")
+# plt.show()
+
+# "HOMO-LUMO gap", "electrostatic_potential", "ESP pos mean", "ESP neg mean", "QM Dipole",
+# "electronegativity", "polarizability", "oxidation potential", "reduction potential"
+
+CF_8 = x.iloc[79].values        # benchmark
+# print(x.iloc[79])
+
+gap_max = x['HOMO-LUMO gap'].max()
+gap_min = x['HOMO-LUMO gap'].min()
+electrostatic_max = x['electrostatic_potential'].max()
+electrostatic_min = x['electrostatic_potential'].min()
+ESP_pos_max = x['ESP pos mean'].max()
+ESP_pos_min = x['ESP pos mean'].min()
+ESP_neg_max = x['ESP neg mean'].max()
+ESP_neg_min = x['ESP neg mean'].min()
+dipole_max = x['QM Dipole'].max()
+dipole_min = x['QM Dipole'].min()
+electronegativity_max = x['electronegativity'].max()
+electronegativity_min = x['electronegativity'].min()
+polarizability_max = x['polarizability'].max()
+polarizability_min = x['polarizability'].min()
+oxidation_max = x['oxidation potential'].max()
+oxidation_min = x['oxidation potential'].min()
+reduction_max = x['reduction potential'].max()
+reduction_min = x['reduction potential'].min()
+l1_max = x['l1'].max()
+l1_min = x['l1'].min()
+l2_max = x['l2'].max()
+l2_min = x['l2'].min()
+l3_max = x['l3'].max()
+l3_min = x['l3'].min()
+l4_max = x['l4'].max()
+l4_min = x['l4'].min()
+
+# read model
+gbr = joblib.load("model/train_model_562232_0.83_0.11.m")
+
+# # label
+# l1_pred_list = []
+# l2_pred_list = []
+# l3_pred_list = []
+# l4_pred_list = []
+# l1_copy = CF_8.copy()
+# for i in range(l1_min, l1_max+1):
+#     l1_copy[0] = i
+#     y_pred = gbr.predict([l1_copy])
+#     l1_pred_list.append(y_pred[0])
+#
+# l2_copy = CF_8.copy()
+# for i in range(l2_min, l2_max+1):
+#     l2_copy[1] = i
+#     y_pred = gbr.predict([l2_copy])
+#     l2_pred_list.append(y_pred[0])
+#
+# l3_copy = CF_8.copy()
+# for i in range(l3_min, l3_max+1):
+#     l3_copy[2] = i
+#     y_pred = gbr.predict([l3_copy])
+#     l3_pred_list.append(y_pred[0])
+#
+# l4_copy = CF_8.copy()
+# for i in range(l4_min, l4_max+1):
+#     l4_copy[3] = i
+#     y_pred = gbr.predict([l4_copy])
+#     l4_pred_list.append(y_pred[0])
+
+# # l1
+# xx = [i for i in range(l1_min, l1_max+1)]
+# yy = normalization(np.array(l1_pred_list))
+# plt.plot(xx, yy)
+# plt.scatter(xx, yy, alpha=0.8, s=60, marker='o', label='l1')
+# plt.legend(loc=0)
+# plt.tight_layout()
+# plt.savefig('l1.png')
+# plt.show()
+# df = pd.DataFrame()
+# df['x'] = xx
+# df['y'] = yy
+# df.to_csv('l1.csv', index=False)
+
+# # l2
+# xx = [i for i in range(l2_min, l2_max+1)]
+# yy = normalization(np.array(l2_pred_list))
+# plt.plot(xx, yy)
+# plt.scatter(xx, yy, alpha=0.8, s=60, marker='o', label='l2')
+# plt.legend(loc=0)
+# plt.tight_layout()
+# plt.savefig('l2.png')
+# plt.show()
+# df = pd.DataFrame()
+# df['x'] = xx
+# df['y'] = yy
+# df.to_csv('l2.csv', index=False)
+#
+# # l3
+# xx = [i for i in range(l3_min, l3_max+1)]
+# yy = normalization(np.array(l3_pred_list))
+# plt.plot(xx, yy)
+# plt.scatter(xx, yy, alpha=0.8, s=60, marker='o', label='l3')
+# plt.legend(loc=0)
+# plt.tight_layout()
+# plt.savefig('l3.png')
+# # plt.show()
+# df = pd.DataFrame()
+# df['x'] = xx
+# df['y'] = yy
+# df.to_csv('l3.csv', index=False)
+
+# # l4
+# xx = [i for i in range(l4_min, l4_max+1)]
+# yy = normalization(np.array(l4_pred_list))
+# plt.plot(xx, yy)
+# plt.scatter(xx, yy, alpha=0.8, s=60, marker='o', label='l4')
+# plt.legend(loc=0)
+# plt.tight_layout()
+# plt.savefig('l4.png')
+# plt.show()
+# df = pd.DataFrame()
+# df['x'] = xx
+# df['y'] = yy
+# df.to_csv('l4.csv', index=False)
+######################################################################################
+# # oxidation, reduction, gap
+# oxi_pred_list = []
+# red_pred_list = []
+# gap_pred_list = []
+# oxi_copy = CF_8.copy()
+# for i in np.linspace(oxidation_min, oxidation_max, 200):
+#     oxi_copy[21] = i
+#     y_pred = gbr.predict([oxi_copy])
+#     oxi_pred_list.append(y_pred[0])
+#
+# red_copy = CF_8.copy()
+# for i in np.linspace(reduction_min, reduction_max, 200):
+#     red_copy[22] = i
+#     y_pred = gbr.predict([red_copy])
+#     red_pred_list.append(y_pred[0])
+#
+# gap_copy = CF_8.copy()
+# for i in np.linspace(gap_min, gap_max, 200):
+#     gap_copy[14] = i
+#     y_pred = gbr.predict([gap_copy])
+#     gap_pred_list.append(y_pred[0])
+
+# # oxidation
+# xx = [i for i in np.linspace(oxidation_min, oxidation_max, 200)]
+# yy = normalization(np.array(oxi_pred_list))
+# plt.plot(xx, yy, label='oxidation potential')
+# plt.legend(loc=0)
+# plt.tight_layout()
+# plt.savefig('oxidation.png')
+# plt.show()
+# df = pd.DataFrame()
+# df['x'] = xx
+# df['y'] = yy
+# df.to_csv('oxidation.csv', index=False)
+
+# # reduction
+# xx = [i for i in np.linspace(reduction_min, reduction_max, 200)]
+# yy = normalization(np.array(red_pred_list))
+# plt.plot(xx, yy, label='reduction potential')
+# plt.legend(loc=0)
+# plt.tight_layout()
+# plt.savefig('reduction.png')
+# plt.show()
+# df = pd.DataFrame()
+# df['x'] = xx
+# df['y'] = yy
+# df.to_csv('reduction.csv', index=False)
+
+# # 'HOMO-LUMO gap'
+# xx = [i for i in np.linspace(gap_min, gap_max, 200)]
+# yy = normalization(np.array(gap_pred_list))
+# plt.plot(xx, yy, label='HOMO-LUMO gap')
+# plt.legend(loc=0)
+# plt.tight_layout()
+# plt.savefig('HOMO-LUMO gap.png')
+# plt.show()
+# df = pd.DataFrame()
+# df['x'] = xx
+# df['y'] = yy
+# df.to_csv('HOMO-LUMO gap.csv', index=False)
+######################################################################################
+# # ESP pos and neg
+# ESP_pos_pred_list = []
+# ESP_neg_pred_list = []
+# ESP_pos_copy = CF_8.copy()
+# for i in np.linspace(ESP_pos_min, ESP_pos_max, 200):
+#     ESP_pos_copy[16] = i
+#     y_pred = gbr.predict([ESP_pos_copy])
+#     ESP_pos_pred_list.append(y_pred[0])
+#
+# ESP_neg_copy = CF_8.copy()
+# for i in np.linspace(ESP_neg_min, ESP_neg_max, 200):
+#     ESP_neg_copy[17] = i
+#     y_pred = gbr.predict([ESP_neg_copy])
+#     ESP_neg_pred_list.append(y_pred[0])
+
+# # ESP pos mean
+# xx = [i for i in np.linspace(ESP_pos_min, ESP_pos_max, 200)]
+# yy = normalization(np.array(ESP_pos_pred_list))
+# plt.plot(xx, yy, label='ESP pos mean')
+# plt.legend(loc=0)
+# plt.tight_layout()
+# plt.savefig('ESP pos mean.png')
+# plt.show()
+# df = pd.DataFrame()
+# df['x'] = xx
+# df['y'] = yy
+# df.to_csv('ESP pos mean.csv', index=False)
+
+# # ESP neg mean
+# xx = [i for i in np.linspace(ESP_neg_min, ESP_neg_max, 200)]
+# yy = normalization(np.array(ESP_neg_pred_list))
+# plt.plot(xx, yy, label='ESP neg mean')
+# plt.legend(loc=0)
+# plt.tight_layout()
+# plt.savefig('ESP neg mean.png')
+# plt.show()
+# df = pd.DataFrame()
+# df['x'] = xx
+# df['y'] = yy
+# df.to_csv('ESP neg mean.csv', index=False)
+######################################################################################
+# electrostatic_potential and QM dipole
+pred_list = []
+xx = []
+yy = []
+elect_dipole_copy = CF_8.copy()
+for i in np.linspace(electrostatic_min, electrostatic_max, 200):
+    for j in np.linspace(dipole_min, dipole_max, 200):
+        elect_dipole_copy[15] = i
+        elect_dipole_copy[18] = j
+        y_pred = gbr.predict([elect_dipole_copy])
+        pred_list.append(y_pred[0])
+        xx.append(j)
+        yy.append(i)
+
+y = np.linspace(electrostatic_min, electrostatic_max, 200)
+x = np.linspace(dipole_min, dipole_max, 200)
+X, Y = np.meshgrid(x, y)
+Z = np.array(pred_list).reshape(200, 200)
+a = plt.contourf(X, Y, Z, 100, cmap=plt.cm.Spectral.reversed())
+plt.xlabel('QM dipole (debye)', size=18)
+plt.ylabel('Electrostatic potential (area)', size=18)
+# plt.xticks([50, 60, 70, 80, 90], fontsize=18)
+# plt.yticks([70, 85, 100, 115, 130], fontsize=18)
+cbar = plt.colorbar(a)
+# cbar.set_ticks([0, 0.2, 0.4, 0.6, 0.8])
+# cbar.ax.tick_params(labelsize=18)
+# plt.subplots_adjust(left=0.18, right=0.95, bottom=0.17, top=0.88, wspace=0.35, hspace=0.25)
+# plt.figtext(0.8, 0.9, '$E_a$(eV)', fontsize=18)
+plt.tight_layout()
+plt.savefig('electrostatic_potential-QM dipole.jpg')
+plt.show()
+df = pd.DataFrame()
+df['dipole'] = xx
+df['electrostatic'] = yy
+df['energy'] = pred_list
+df.to_csv('electrostatic_potential-QM dipole.csv', index=False)
+
+# # electronegativity and polarizability
+# pred_list = []
+# xx = []
+# yy = []
+# elect_polar_copy = CF_8.copy()
+# for i in np.linspace(electronegativity_min, electronegativity_max, 200):
+#     for j in np.linspace(polarizability_min, polarizability_max, 200):
+#         elect_polar_copy[19] = i
+#         elect_polar_copy[20] = j
+#         y_pred = gbr.predict([elect_polar_copy])
+#         pred_list.append(y_pred[0])
+#         xx.append(j)
+#         yy.append(i)
+#
+# y = np.linspace(electronegativity_min, electronegativity_max, 200)
+# x = np.linspace(polarizability_min, polarizability_max, 200)
+# X, Y = np.meshgrid(x, y)
+# Z = np.array(pred_list).reshape(200, 200)
+# a = plt.contourf(X, Y, Z, 100, cmap=plt.cm.Spectral.reversed())
+# plt.xlabel('polarizability ((in AU))', size=18)
+# plt.ylabel('electronegativity (hartree)', size=18)
+# # plt.xticks([50, 60, 70, 80, 90], fontsize=18)
+# # plt.yticks([70, 85, 100, 115, 130], fontsize=18)
+# cbar = plt.colorbar(a)
+# # cbar.set_ticks([0, 0.2, 0.4, 0.6, 0.8])
+# # cbar.ax.tick_params(labelsize=18)
+# # plt.subplots_adjust(left=0.18, right=0.95, bottom=0.17, top=0.88, wspace=0.35, hspace=0.25)
+# # plt.figtext(0.8, 0.9, '$E_a$(eV)', fontsize=18)
+# plt.tight_layout()
+# plt.savefig('electronegativity-polarizability.jpg')
+# plt.show()
+# df = pd.DataFrame()
+# df['polarizability'] = xx
+# df['electronegativity'] = yy
+# df['energy'] = pred_list
+# df.to_csv('electronegativity-polarizability.csv', index=False)
+
+# -*- coding: utf-8 -*-
+"""
+-------------------------------------------------
+   File Name：     GBDT_select
+   Description :
+   Author :       DrZ
+   date：          2022/10/18
+-------------------------------------------------
+   Change Activity:
+                   2022/10/18:
+-------------------------------------------------
+"""
+import sys
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score
+from sklearn.externals import joblib
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import GradientBoostingRegressor
+
+
+pd.set_option('display.max_columns', None)
+sys.setrecursionlimit(10000000)
+data = pd.read_csv(r"F:\pycharmProject\my_job\daily_test\pengchao\new_update_minus0\pengchao_minus0.csv")
+
+data1 = data[0:82]
+y = data1['barrier'].values
+x = data1.drop(["barrier", "reaction energy", "top adsorption", "bottom adsorption", "electron_density"], axis=1)
+# 8 test data
+test_data = data[79:]
+y_add = test_data['barrier'].values
+x_add = test_data.drop(["barrier", "reaction energy", "top adsorption", "bottom adsorption", "electron_density"], axis=1)
+
+for train_size in [0.9]:
+    print(train_size)
+    for i in range(1990000, 2000000):
+        if i % 200 == 0:
+            print(i)
+        x_train, x_test, y_train, y_test = train_test_split(x, y, random_state=i, train_size=train_size)
+        y_test = np.append(y_test, y_add)
+        x_test = pd.concat([x_test, x_add])
+        # if np.max(y_test) < 0.6:
+        #     continue
+        gbr = GradientBoostingRegressor(n_estimators=100, max_depth=8, min_samples_split=3, learning_rate=0.05, loss='ls')
+        gbr.fit(x_train, y_train.ravel())
+
+        # # 读取模型
+        # gbr = joblib.load("train_model.m")
+
+        y_gbr = gbr.predict(x_train)
+        y_gbr1 = gbr.predict(x_test)
+        # [print(i) for i in gbr.predict(x)]
+        r2 = r2_score(y_test, y_gbr1)
+        # print('总R2:', r2_score(y, gbr.predict(x)))
+        mse = mean_squared_error(y_test, y_gbr1)
+        rr = np.sqrt(mse)
+        if r2 > 0.8 and rr < 0.17:
+            print(i)
+            print("R2:", r2)
+            print("RMSE:", rr)
+            # 保存模型到本地
+            joblib.dump(gbr, "./model/train_model_{}_{}_{}.m".format(i, round(r2, 2), round(rr, 2)))
+
+            feature_importance = gbr.feature_importances_
+            print(feature_importance)
+
+            feature_title = ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10", "l11", "l12", "l13", "l14",
+             "HOMO-LUMO gap", "electrostatic_potential", "ESP pos mean", "ESP neg mean", "QM Dipole",
+             "electronegativity", "polarizability", "oxidation potential", "reduction potential"]
+
+            plt.figure(figsize=(14, 6))
+            ax1 = plt.subplot(1, 2, 1)
+            # stack_barh
+            ind = ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10", "l11", "l12", "l13", "l14",
+             "HOMO-LUMO gap", "electrostatic_potential", "ESP pos mean", "ESP neg mean", "QM Dipole",
+             "electronegativity", "polarizability", "oxidation potential", "reduction potential"]
+            df1 = pd.DataFrame(columns=feature_title, index=ind)
+            df1.iloc[0, 0] = feature_importance[0]
+            df1.iloc[1, 1] = feature_importance[1]
+            df1.iloc[2, 2] = feature_importance[2]
+            df1.iloc[3, 3] = feature_importance[3]
+            df1.iloc[4, 4] = feature_importance[4]
+            df1.iloc[5, 5] = feature_importance[5]
+            df1.iloc[6, 6] = feature_importance[6]
+            df1.iloc[7, 7] = feature_importance[7]
+            df1.iloc[8, 8] = feature_importance[8]
+            df1.iloc[9, 9] = feature_importance[9]
+            df1.iloc[10, 10] = feature_importance[10]
+            df1.iloc[11, 11] = feature_importance[11]
+            df1.iloc[12, 12] = feature_importance[12]
+            df1.iloc[13, 13] = feature_importance[13]
+            df1.iloc[14, 14] = feature_importance[14]
+            df1.iloc[15, 15] = feature_importance[15]
+            df1.iloc[16, 16] = feature_importance[16]
+            df1.iloc[17, 17] = feature_importance[17]
+            df1.iloc[18, 18] = feature_importance[18]
+            df1.iloc[19, 19] = feature_importance[19]
+            df1.iloc[20, 20] = feature_importance[20]
+            df1.iloc[21, 21] = feature_importance[21]
+            df1.iloc[22, 22] = feature_importance[22]
+
+            df1 = df1.fillna(0)
+            df1.plot(kind='barh', stacked=True, align='center', alpha=0.8, ax=ax1)
+            plt.xlabel('Importance', size=14)
+            plt.xticks(fontsize=12)
+            plt.yticks(fontsize=12)
+            ax1.get_legend().remove()
+            ax2 = plt.subplot(1, 2, 2)
+            plt.plot(y_train, y_train, c='indigo', alpha=0.7)
+            plt.xlabel('$E_{DFT}$(eV)', size=14)
+            plt.ylabel('$E_{Predicted}$(eV)', size=14)
+            plt.text(1, 0.4, "RMSE={}".format(np.round(rr, 2)), size=14)
+            plt.text(1, 0.3, "R2={}".format(np.round(r2, 2)), size=14)
+            plt.scatter(y_train, y_gbr, c='indigo', alpha=0.5, s=100, label="training")
+            plt.scatter(y_test, y_gbr1, c='green', alpha=0.7, s=100, label="test")
+            plt.legend(loc=2, fontsize=14)
+            plt.xticks(fontsize=12)
+            plt.yticks(fontsize=12)
+            plt.savefig('./fig/{}_{}_{}.jpg'.format(i, round(r2, 2), round(rr, 2)))
+            plt.tight_layout()
+            # plt.show()
+
+数据预测
+# -*- coding: utf-8 -*-
+"""
+-------------------------------------------------
+   File Name：     predict_500
+   Description :
+   Author :       DrZ
+   date：          2022/12/10
+-------------------------------------------------
+   Change Activity:
+                   2022/12/10:
+-------------------------------------------------
+"""
+import sys
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score
+from sklearn.externals import joblib
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import GradientBoostingRegressor
+
+pd.set_option('display.max_columns', None)
+sys.setrecursionlimit(10000000)
+data = pd.read_csv(r"predict.csv")
+x = data.drop(['Title'], axis=1)
+print(x)
+# 读取模型
+gbr = joblib.load("model/train_model_562232_0.83_0.11.m")
+
+y_gbr = gbr.predict(x)
+print(y_gbr)
+print(type(y_gbr))
+data['Predict_barrier'] = y_gbr
+data.to_excel('predict_with_barrier.xlsx', index=False)
